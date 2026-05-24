@@ -1,0 +1,135 @@
+services:
+
+  # ── Redis — очередь задач между сервисами ───────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: neurofix-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    networks:
+      - neurofix
+
+  # ── Telegram Bot ─────────────────────────────────────────────────────────────
+  bot:
+    build: ./bot
+    container_name: neurofix-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - neurofix
+
+  # ── Классификатор фото (OpenCLIP ViT-B/32) ──────────────────────────────────
+  classifier:
+    build: ./classifier
+    container_name: neurofix-classifier
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - models_clip:/root/.cache
+    networks:
+      - neurofix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── Реставрация старых фото ──────────────────────────────────────────────────
+  worker:
+    build: ./worker
+    container_name: neurofix-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    volumes:
+      - ./data:/data
+      - ./models:/models
+      - ./models/shape_predictor_68_face_landmarks.dat:/app/engines/old_photo/Face_Detection/shape_predictor_68_face_landmarks.dat:ro
+    networks:
+      - neurofix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── Улучшение качества (Real-ESRGAN + CodeFormer) ────────────────────────────
+  enhancer:
+    build: ./enhancer
+    container_name: neurofix-enhancer
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    networks:
+      - neurofix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── Раскраска чёрно-белых фото (DDColor) ────────────────────────────────────
+  colorizer:
+    build: ./colorizer
+    container_name: neurofix-colorizer
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - models_ddcolor:/root/.cache
+    networks:
+      - neurofix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── Анализ портрета (InsightFace + DeepFace) ─────────────────────────────────
+  emotion:
+    build: ./emotion
+    container_name: neurofix-emotion
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - models_emotion:/root/.deepface
+    networks:
+      - neurofix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+networks:
+  neurofix:
+    driver: bridge
+
+volumes:
+  redis_data:
+  models_clip:
+  models_ddcolor:
+  models_emotion:

@@ -1,0 +1,14 @@
+numpy<2
+redis==5.2.1
+python-dotenv==1.2.2
+scikit-image
+easydict
+PyYAML
+dominate>=2.3.1
+dill
+tensorboardX
+scipy
+opencv-python-headless
+einops
+matplotlib
+dlib
